@@ -2,54 +2,150 @@ import io
 import streamlit as st
 from pptx import Presentation
 from pptx.util import Inches, Pt
-from pptx.enum.text import PP_ALIGN
+from pptx.enum.text import PP_ALIGN, MSO_ANCHOR
+from pptx.enum.shapes import MSO_SHAPE
+from pptx.dml.color import RGBColor
 
+# === Configuration & Colors ===
 PPT_MIME = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
 
-def add_bilingual_slide(prs, title_en, title_ar, bullets_en, bullets_ar):
-    slide = prs.slides.add_slide(prs.slide_layouts[5])  # blank
+# Theme Colors
+PRIMARY_COLOR = RGBColor(0, 128, 128)    # Teal/Cyan - for headers
+SECONDARY_BG_COLOR = RGBColor(240, 245, 247) # Very light gray/blue - for content boxes
+TEXT_COLOR_DARK = RGBColor(50, 50, 50)   # Dark gray - for standard text
+TEXT_COLOR_WHITE = RGBColor(255, 255, 255) # White - for text on primary color
 
-    # Title
-    title_box = slide.shapes.add_textbox(Inches(0.6), Inches(0.3), Inches(12.2), Inches(0.8))
-    tf = title_box.text_frame
+# Dimensions
+SLIDE_WIDTH = Inches(13.333)
+SLIDE_HEIGHT = Inches(7.5)
+MARGIN = Inches(0.5)
+HEADER_HEIGHT = Inches(1.2)
+CONTENT_TOP = HEADER_HEIGHT + Inches(0.3)
+CONTENT_HEIGHT = SLIDE_HEIGHT - CONTENT_TOP - MARGIN
+BOX_WIDTH = (SLIDE_WIDTH - (MARGIN * 3)) / 2
+
+
+# === Helper Functions for Styling ===
+
+def style_title_shape(shape, text_en, text_ar):
+    """Styles the header bar shape."""
+    shape.fill.solid()
+    shape.fill.fore_color.rgb = PRIMARY_COLOR
+    shape.line.fill.background() # No outline
+
+    tf = shape.text_frame
     tf.clear()
+    tf.vertical_anchor = MSO_ANCHOR.MIDDLE
+    
     p = tf.paragraphs[0]
-    p.text = f"{title_en} | {title_ar}"
-    p.font.size = Pt(28)
-    p.font.bold = True
-    p.font.name = "Arial"
+    # English part
+    run_en = p.add_run()
+    run_en.text = title_en
+    run_en.font.name = "Arial"
+    run_en.font.size = Pt(28)
+    run_en.font.bold = True
+    run_en.font.color.rgb = TEXT_COLOR_WHITE
 
-    # Left (English)
-    left = slide.shapes.add_textbox(Inches(0.6), Inches(1.3), Inches(6.0), Inches(5.6))
-    tfl = left.text_frame
-    tfl.clear()
-    for i, b in enumerate(bullets_en):
-        pp = tfl.paragraphs[0] if i == 0 else tfl.add_paragraph()
+    # Separator
+    run_sep = p.add_run()
+    run_sep.text = "  |  "
+    run_sep.font.size = Pt(28)
+    run_sep.font.color.rgb = TEXT_COLOR_WHITE
+    
+    # Arabic part
+    run_ar = p.add_run()
+    run_ar.text = title_ar
+    run_ar.font.name = "Arial"
+    run_ar.font.size = Pt(28)
+    run_ar.font.bold = True
+    run_ar.font.color.rgb = TEXT_COLOR_WHITE
+
+def style_content_box(shape, bullets, is_arabic=False):
+    """Styles the rounded rectangles and adds bullet points."""
+    # Shape style
+    shape.fill.solid()
+    shape.fill.fore_color.rgb = SECONDARY_BG_COLOR
+    shape.line.color.rgb = PRIMARY_COLOR
+    shape.line.width = Pt(1.5)
+
+    # Text styling
+    tf = shape.text_frame
+    tf.clear()
+    tf.margin_left = Inches(0.2)
+    tf.margin_right = Inches(0.2)
+    tf.margin_top = Inches(0.2)
+    
+    for i, b in enumerate(bullets):
+        pp = tf.paragraphs[0] if i == 0 else tf.add_paragraph()
         pp.text = b
         pp.font.size = Pt(18)
         pp.font.name = "Arial"
+        pp.font.color.rgb = TEXT_COLOR_DARK
+        # Add spacing between bullets
+        pp.space_before = Pt(10) 
+        
+        if is_arabic:
+            pp.alignment = PP_ALIGN.RIGHT
 
-    # Right (Arabic)
-    right = slide.shapes.add_textbox(Inches(7.0), Inches(1.3), Inches(6.0), Inches(5.6))
-    tfr = right.text_frame
-    tfr.clear()
-    for i, b in enumerate(bullets_ar):
-        pp = tfr.paragraphs[0] if i == 0 else tfr.add_paragraph()
-        pp.text = b
-        pp.font.size = Pt(18)
-        pp.font.name = "Arial"
-        pp.alignment = PP_ALIGN.RIGHT
+# === Main Slide Building Function ===
+
+def add_bilingual_slide_styled(prs, title_en, title_ar, bullets_en, bullets_ar):
+    # Use blank layout (usually index 6 in standard themes, but let's ensure it's blank)
+    blank_layout = None
+    for layout in prs.slide_layouts:
+        if len(layout.placeholders) == 0:
+            blank_layout = layout
+            break
+    if blank_layout is None:
+        blank_layout = prs.slide_layouts[len(prs.slide_layouts)-1] # Fallback
+
+    slide = prs.slides.add_slide(blank_layout)
+
+    # 1. Header Bar (Rectangle)
+    header_shape = slide.shapes.add_shape(
+        MSO_SHAPE.RECTANGLE, 
+        0, 0, SLIDE_WIDTH, HEADER_HEIGHT
+    )
+    style_title_shape(header_shape, title_en, title_ar)
+
+    # 2. Left Box (English Content - Rounded Rectangle)
+    left_box = slide.shapes.add_shape(
+        MSO_SHAPE.ROUNDED_RECTANGLE,
+        MARGIN, CONTENT_TOP, BOX_WIDTH, CONTENT_HEIGHT
+    )
+    style_content_box(left_box, bullets_en, is_arabic=False)
+
+    # 3. Right Box (Arabic Content - Rounded Rectangle)
+    right_box = slide.shapes.add_shape(
+        MSO_SHAPE.ROUNDED_RECTANGLE,
+        MARGIN + BOX_WIDTH + MARGIN, CONTENT_TOP, BOX_WIDTH, CONTENT_HEIGHT
+    )
+    style_content_box(right_box, bullets_ar, is_arabic=True)
+
 
 def build_pptx_bytes():
     prs = Presentation()
+    # Set slide dimensions to Widescreen (16:9) for better modern look
+    prs.slide_width = SLIDE_WIDTH
+    prs.slide_height = SLIDE_HEIGHT
 
-    # Title slide
+    # --- Title Slide ---
     s0 = prs.slides.add_slide(prs.slide_layouts[0])
-    s0.shapes.title.text = "Kaziony | كازيوني"
-    s0.placeholders[1].text = "How it works (Tripoli) | كيف يخدم (طرابلس)"
+    
+    # Style Title
+    title = s0.shapes.title
+    title.text = "Kaziony | كازيوني"
+    title.text_frame.paragraphs[0].font.color.rgb = PRIMARY_COLOR
+    title.text_frame.paragraphs[0].font.bold = True
+    
+    # Style Subtitle
+    subtitle = s0.placeholders[1]
+    subtitle.text = "How it works (Tripoli) | كيف يخدم (طرابلس)"
+    subtitle.text_frame.paragraphs[0].font.color.rgb = TEXT_COLOR_DARK
 
-    # Slides (edit text anytime)
-    add_bilingual_slide(
+
+    # --- Content Slides ---
+    add_bilingual_slide_styled(
         prs,
         "What it is",
         "شنو هو",
@@ -61,7 +157,7 @@ def build_pptx_bytes():
          "السائق لازم يخصم كريديت واحد باش يقبل الطلب"]
     )
 
-    add_bilingual_slide(
+    add_bilingual_slide_styled(
         prs,
         "Customer flow",
         "خطوات العميل",
@@ -75,7 +171,7 @@ def build_pptx_bytes():
          "يدفع كاش + تيب عند الاستلام"]
     )
 
-    add_bilingual_slide(
+    add_bilingual_slide_styled(
         prs,
         "Driver flow (the core idea)",
         "خطوات السائق (الفكرة الأساسية)",
@@ -89,7 +185,7 @@ def build_pptx_bytes():
          "يلتقط الطلب ويدفع قيمته، وبعدها ياخذ الكاش + التوصيل + التيب"]
     )
 
-    add_bilingual_slide(
+    add_bilingual_slide_styled(
         prs,
         "Credits",
         "الكريديت",
@@ -101,7 +197,7 @@ def build_pptx_bytes():
          "لو ما فيش كريديت: ما يقدرش يقبل طلبات"]
     )
 
-    add_bilingual_slide(
+    add_bilingual_slide_styled(
         prs,
         "Pricing (distance-based)",
         "التسعير (حسب المسافة)",
@@ -111,7 +207,7 @@ def build_pptx_bytes():
          "السعر يظهر قبل تأكيد الطلب"]
     )
 
-    add_bilingual_slide(
+    add_bilingual_slide_styled(
         prs,
         "Dispatch (hybrid)",
         "الإسناد (هجين)",
@@ -121,7 +217,7 @@ def build_pptx_bytes():
          "الموزّع يقدر يعيّن سائق يدوي لو احتاج"]
     )
 
-    add_bilingual_slide(
+    add_bilingual_slide_styled(
         prs,
         "Admin stats",
         "إحصائيات الإدارة",
@@ -139,15 +235,20 @@ def build_pptx_bytes():
     prs.save(buf)
     return buf.getvalue()
 
+# === Streamlit UI ===
 st.set_page_config(page_title="Kaziony PPT Maker", layout="centered")
 st.title("Kaziony PowerPoint Maker | مولّد عرض كازيوني")
+st.markdown("---")
+st.write("Click the button below to generate a professionally styled PowerPoint presentation describing how Kaziony works.")
+st.write("اضغط على الزر أدناه لإنشاء عرض تقديمي بتصميم احترافي يشرح كيفية عمل كازيوني.")
 
-st.write("Click the button, then download the PPTX file.")
-if st.button("Generate PowerPoint"):
-    ppt_bytes = build_pptx_bytes()
+if st.button("Generate Styled PowerPoint | إنشاء العرض المطور", type="primary"):
+    with st.spinner("Generating presentation... | جاري إنشاء العرض..."):
+        ppt_bytes = build_pptx_bytes()
+    st.success("Done! Download below. | تم! قم بالتنزيل أدناه.")
     st.download_button(
-        label="Download PowerPoint (.pptx)",
+        label="Download PowerPoint (.pptx) | تنزيل العرض",
         data=ppt_bytes,
-        file_name="Kaziony_Explainer.pptx",
+        file_name="Kaziony_Explainer_Styled.pptx",
         mime=PPT_MIME
     )
