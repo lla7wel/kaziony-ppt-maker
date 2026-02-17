@@ -2,253 +2,333 @@ import io
 import streamlit as st
 from pptx import Presentation
 from pptx.util import Inches, Pt
-from pptx.enum.text import PP_ALIGN, MSO_ANCHOR
-from pptx.enum.shapes import MSO_SHAPE
+from pptx.enum.text import PP_ALIGN
+from pptx.enum.shapes import MSO_SHAPE, MSO_CONNECTOR
 from pptx.dml.color import RGBColor
 
-# === Configuration & Colors ===
 PPT_MIME = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
 
-# Theme Colors
-PRIMARY_COLOR = RGBColor(0, 128, 128)    # Teal/Cyan - for headers
-SECONDARY_BG_COLOR = RGBColor(240, 245, 247) # Very light gray/blue - for content boxes
-TEXT_COLOR_DARK = RGBColor(50, 50, 50)   # Dark gray - for standard text
-TEXT_COLOR_WHITE = RGBColor(255, 255, 255) # White - for text on primary color
+# ---------- Helpers ----------
+def _rtl(paragraph):
+    # Forces Right-To-Left on Arabic paragraphs
+    pPr = paragraph._p.get_or_add_pPr()
+    pPr.set("rtl", "1")
 
-# Dimensions
-SLIDE_WIDTH = Inches(13.333)
-SLIDE_HEIGHT = Inches(7.5)
-MARGIN = Inches(0.5)
-HEADER_HEIGHT = Inches(1.2)
-CONTENT_TOP = HEADER_HEIGHT + Inches(0.3)
-CONTENT_HEIGHT = SLIDE_HEIGHT - CONTENT_TOP - MARGIN
-BOX_WIDTH = (SLIDE_WIDTH - (MARGIN * 3)) / 2
+def _header(slide, title_en, title_ar):
+    # Top dark bar
+    bar = slide.shapes.add_shape(
+        MSO_SHAPE.RECTANGLE, Inches(0), Inches(0), Inches(13.333), Inches(0.85)
+    )
+    bar.fill.solid()
+    bar.fill.fore_color.rgb = RGBColor(20, 28, 41)
+    bar.line.fill.background()
 
-
-# === Helper Functions for Styling ===
-
-def style_title_shape(shape, text_en, text_ar):
-    """Styles the header bar shape."""
-    shape.fill.solid()
-    shape.fill.fore_color.rgb = PRIMARY_COLOR
-    shape.line.fill.background() # No outline
-
-    tf = shape.text_frame
+    # English title (left)
+    en = slide.shapes.add_textbox(Inches(0.6), Inches(0.12), Inches(6.2), Inches(0.6))
+    tf = en.text_frame
     tf.clear()
-    tf.vertical_anchor = MSO_ANCHOR.MIDDLE
-    
     p = tf.paragraphs[0]
-    # English part
-    run_en = p.add_run()
-    run_en.text = title_en
-    run_en.font.name = "Arial"
-    run_en.font.size = Pt(28)
-    run_en.font.bold = True
-    run_en.font.color.rgb = TEXT_COLOR_WHITE
+    p.text = title_en
+    p.font.name = "Calibri"
+    p.font.size = Pt(26)
+    p.font.bold = True
+    p.font.color.rgb = RGBColor(255, 255, 255)
+    p.alignment = PP_ALIGN.LEFT
 
-    # Separator
-    run_sep = p.add_run()
-    run_sep.text = "  |  "
-    run_sep.font.size = Pt(28)
-    run_sep.font.color.rgb = TEXT_COLOR_WHITE
-    
-    # Arabic part
-    run_ar = p.add_run()
-    run_ar.text = title_ar
-    run_ar.font.name = "Arial"
-    run_ar.font.size = Pt(28)
-    run_ar.font.bold = True
-    run_ar.font.color.rgb = TEXT_COLOR_WHITE
-
-def style_content_box(shape, bullets, is_arabic=False):
-    """Styles the rounded rectangles and adds bullet points."""
-    # Shape style
-    shape.fill.solid()
-    shape.fill.fore_color.rgb = SECONDARY_BG_COLOR
-    shape.line.color.rgb = PRIMARY_COLOR
-    shape.line.width = Pt(1.5)
-
-    # Text styling
-    tf = shape.text_frame
+    # Arabic title (right)
+    ar = slide.shapes.add_textbox(Inches(6.6), Inches(0.12), Inches(6.1), Inches(0.6))
+    tf = ar.text_frame
     tf.clear()
-    tf.margin_left = Inches(0.2)
-    tf.margin_right = Inches(0.2)
-    tf.margin_top = Inches(0.2)
-    
-    for i, b in enumerate(bullets):
-        pp = tf.paragraphs[0] if i == 0 else tf.add_paragraph()
-        pp.text = b
-        pp.font.size = Pt(18)
-        pp.font.name = "Arial"
-        pp.font.color.rgb = TEXT_COLOR_DARK
-        # Add spacing between bullets
-        pp.space_before = Pt(10) 
-        
-        if is_arabic:
-            pp.alignment = PP_ALIGN.RIGHT
+    p = tf.paragraphs[0]
+    p.text = title_ar
+    p.font.name = "Tahoma"
+    p.font.size = Pt(26)
+    p.font.bold = True
+    p.font.color.rgb = RGBColor(255, 255, 255)
+    p.alignment = PP_ALIGN.RIGHT
+    _rtl(p)
 
-# === Main Slide Building Function ===
+def _bilingual_bullets(slide, bullets_en, bullets_ar):
+    # Small EN / AR tags
+    for x, label in [(0.6, "EN"), (7.0, "AR")]:
+        tag = slide.shapes.add_shape(
+            MSO_SHAPE.ROUNDED_RECTANGLE, Inches(x), Inches(1.1), Inches(0.9), Inches(0.35)
+        )
+        tag.fill.solid()
+        tag.fill.fore_color.rgb = RGBColor(240, 243, 247)
+        tag.line.color.rgb = RGBColor(210, 215, 224)
+        tf = tag.text_frame
+        tf.clear()
+        p = tf.paragraphs[0]
+        p.text = label
+        p.font.name = "Calibri"
+        p.font.size = Pt(14)
+        p.font.bold = True
+        p.alignment = PP_ALIGN.CENTER
 
-def add_bilingual_slide_styled(prs, title_en, title_ar, bullets_en, bullets_ar):
-    # Use blank layout (usually index 6 in standard themes, but let's ensure it's blank)
-    blank_layout = None
-    for layout in prs.slide_layouts:
-        if len(layout.placeholders) == 0:
-            blank_layout = layout
-            break
-    if blank_layout is None:
-        blank_layout = prs.slide_layouts[len(prs.slide_layouts)-1] # Fallback
+    # Two columns
+    left = slide.shapes.add_textbox(Inches(0.6), Inches(1.55), Inches(6.1), Inches(5.6))
+    right = slide.shapes.add_textbox(Inches(7.0), Inches(1.55), Inches(6.33), Inches(5.6))
 
-    slide = prs.slides.add_slide(blank_layout)
+    # English box
+    tfl = left.text_frame
+    tfl.clear()
+    tfl.word_wrap = True
+    tfl.margin_left = Inches(0.15)
+    tfl.margin_right = Inches(0.10)
+    tfl.margin_top = Inches(0.08)
+    tfl.margin_bottom = Inches(0.08)
 
-    # 1. Header Bar (Rectangle)
-    header_shape = slide.shapes.add_shape(
-        MSO_SHAPE.RECTANGLE, 
-        0, 0, SLIDE_WIDTH, HEADER_HEIGHT
-    )
-    style_title_shape(header_shape, title_en, title_ar)
+    for i, b in enumerate(bullets_en):
+        p = tfl.paragraphs[0] if i == 0 else tfl.add_paragraph()
+        p.text = f"• {b}"
+        p.font.name = "Calibri"
+        p.font.size = Pt(20)
+        p.space_after = Pt(8)
 
-    # 2. Left Box (English Content - Rounded Rectangle)
-    left_box = slide.shapes.add_shape(
-        MSO_SHAPE.ROUNDED_RECTANGLE,
-        MARGIN, CONTENT_TOP, BOX_WIDTH, CONTENT_HEIGHT
-    )
-    style_content_box(left_box, bullets_en, is_arabic=False)
+    # Arabic box
+    tfr = right.text_frame
+    tfr.clear()
+    tfr.word_wrap = True
+    tfr.margin_left = Inches(0.10)
+    tfr.margin_right = Inches(0.15)
+    tfr.margin_top = Inches(0.08)
+    tfr.margin_bottom = Inches(0.08)
 
-    # 3. Right Box (Arabic Content - Rounded Rectangle)
-    right_box = slide.shapes.add_shape(
-        MSO_SHAPE.ROUNDED_RECTANGLE,
-        MARGIN + BOX_WIDTH + MARGIN, CONTENT_TOP, BOX_WIDTH, CONTENT_HEIGHT
-    )
-    style_content_box(right_box, bullets_ar, is_arabic=True)
+    for i, b in enumerate(bullets_ar):
+        p = tfr.paragraphs[0] if i == 0 else tfr.add_paragraph()
+        p.text = f"• {b}"
+        p.font.name = "Tahoma"
+        p.font.size = Pt(20)
+        p.alignment = PP_ALIGN.RIGHT
+        p.space_after = Pt(8)
+        _rtl(p)
 
+def _order_flow_diagram(slide):
+    steps_en = [
+        "Order placed",
+        "Merchant accepts",
+        "Driver accepts (1 credit)",
+        "Pickup + pay merchant",
+        "On the way",
+        "Delivered + cash collected",
+    ]
+    steps_ar = [
+        "تأكيد الطلب",
+        "قبول المتجر",
+        "قبول السائق (كريديت 1)",
+        "استلام + دفع للمتجر",
+        "في الطريق",
+        "تسليم + تحصيل الكاش",
+    ]
 
-def build_pptx_bytes():
+    x0, y, w, h, gap = 0.6, 2.1, 1.95, 1.1, 0.25
+
+    for i in range(6):
+        x = x0 + i * (w + gap)
+        box = slide.shapes.add_shape(
+            MSO_SHAPE.ROUNDED_RECTANGLE, Inches(x), Inches(y), Inches(w), Inches(h)
+        )
+        box.fill.solid()
+        box.fill.fore_color.rgb = RGBColor(240, 243, 247)
+        box.line.color.rgb = RGBColor(210, 215, 224)
+
+        tf = box.text_frame
+        tf.clear()
+        tf.word_wrap = True
+
+        p1 = tf.paragraphs[0]
+        p1.text = steps_en[i]
+        p1.font.name = "Calibri"
+        p1.font.size = Pt(14)
+        p1.alignment = PP_ALIGN.CENTER
+
+        p2 = tf.add_paragraph()
+        p2.text = steps_ar[i]
+        p2.font.name = "Tahoma"
+        p2.font.size = Pt(14)
+        p2.alignment = PP_ALIGN.CENTER
+        _rtl(p2)
+
+        if i < 5:
+            x1 = x + w
+            x2 = x0 + (i + 1) * (w + gap)
+            line = slide.shapes.add_connector(
+                MSO_CONNECTOR.STRAIGHT,
+                Inches(x1),
+                Inches(y + h / 2),
+                Inches(x2),
+                Inches(y + h / 2),
+            )
+            line.line.color.rgb = RGBColor(130, 140, 155)
+            line.line.width = Pt(2)
+
+# ---------- Build deck ----------
+def build_pptx_bytes(app_name, city, base_fee, per_km, credit_cost):
     prs = Presentation()
-    # Set slide dimensions to Widescreen (16:9) for better modern look
-    prs.slide_width = SLIDE_WIDTH
-    prs.slide_height = SLIDE_HEIGHT
+    # Force 16:9
+    prs.slide_width = Inches(13.333)
+    prs.slide_height = Inches(7.5)
 
-    # --- Title Slide ---
+    # Title slide
     s0 = prs.slides.add_slide(prs.slide_layouts[0])
-    
-    # Style Title
-    title = s0.shapes.title
-    title.text = "Kaziony | كازيوني"
-    title.text_frame.paragraphs[0].font.color.rgb = PRIMARY_COLOR
-    title.text_frame.paragraphs[0].font.bold = True
-    
-    # Style Subtitle
-    subtitle = s0.placeholders[1]
-    subtitle.text = "How it works (Tripoli) | كيف يخدم (طرابلس)"
-    subtitle.text_frame.paragraphs[0].font.color.rgb = TEXT_COLOR_DARK
+    s0.shapes.title.text = f"{app_name} | كازيوني"
+    s0.placeholders[1].text = f"How it works ({city}) | كيف يخدم ({city})"
 
+    slides = [
+        (
+            "What it is",
+            "شنو هو",
+            [
+                f"Delivery app in {city}: food, groceries, pharmacy, scheduled deliveries",
+                "Customer pays cash on delivery",
+                "Driver accepts orders using 1 credit per order",
+            ],
+            [
+                f"تطبيق توصيل في {city}: أكل، بقالة، صيدلية، وتوصيل مجدول",
+                "العميل يدفع كاش عند الاستلام",
+                "السائق يقبل الطلبات بكريديت واحد لكل طلب",
+            ],
+        ),
+        (
+            "Customer flow",
+            "خطوات العميل",
+            [
+                "Choose merchant → add items → checkout",
+                "See delivery fee before ordering",
+                "Track driver live on map",
+                "Pay cash + tip at delivery",
+            ],
+            [
+                "يختار المتجر/المطعم → يضيف الطلب → تأكيد",
+                "يشوف سعر التوصيل قبل ما يأكد",
+                "يتابع السائق على الخريطة",
+                "يدفع كاش + تيب عند الاستلام",
+            ],
+        ),
+        (
+            "Driver flow (core idea)",
+            "خطوات السائق (الفكرة الأساسية)",
+            [
+                "Driver receives an order offer in the app",
+                "To accept: driver must have at least 1 credit",
+                "On accept: 1 credit is deducted immediately",
+                "Driver picks up, pays for items, then collects cash + delivery fee + tip",
+            ],
+            [
+                "السائق توصله عروض طلبات في التطبيق",
+                "باش يقبل: لازم عنده كريديت واحد أو أكثر",
+                "أول ما يقبل: ينخصم كريديت واحد مباشرة",
+                "يلتقط الطلب ويدفع قيمته، وبعدها ياخذ الكاش + التوصيل + التيب",
+            ],
+        ),
+        (
+            "Credits",
+            "الكريديت",
+            [
+                "Drivers buy prepaid credit cards from grocery stores",
+                "Each accepted order costs 1 credit",
+                f"Credit cost (example): {credit_cost if credit_cost else '[set later]'} LYD per order",
+            ],
+            [
+                "السائق يشتري كروت كريديت مسبقة الدفع من البقالات",
+                "كل طلب يقبله = كريديت واحد",
+                f"سعر الكريديت (مثال): {credit_cost if credit_cost else '[يتحدد لاحقاً]'} دينار لكل طلب",
+            ],
+        ),
+        (
+            "Pricing (distance-based)",
+            "التسعير (حسب المسافة)",
+            [
+                "Delivery fee = Base + (Per-km × Distance) + Scheduled fee (if any)",
+                "Fees are shown before placing the order",
+                f"Example inputs: Base={base_fee if base_fee else '[set later]'} LYD, Per-km={per_km if per_km else '[set later]'} LYD/km",
+            ],
+            [
+                "سعر التوصيل = أساسي + (سعر/كم × المسافة) + رسوم الجدولة (لو موجودة)",
+                "السعر يظهر قبل تأكيد الطلب",
+                f"قيم مثال: أساسي={base_fee if base_fee else '[يتحدد لاحقاً]'} دينار، سعر/كم={per_km if per_km else '[يتحدد لاحقاً]'} دينار/كم",
+            ],
+        ),
+        (
+            "Dispatch (hybrid)",
+            "الإسناد (هجين)",
+            [
+                "System offers order to nearby drivers first (auto)",
+                "Dispatcher can assign manually if needed (override)",
+                "Only drivers with credit can accept",
+            ],
+            [
+                "السيستم يعرض الطلب على السائقين القريبين أولاً (تلقائي)",
+                "الموزّع يقدر يعيّن سائق يدوي لو احتاج",
+                "فقط السائق اللي عنده كريديت يقدر يقبل",
+            ],
+        ),
+        (
+            "Live tracking",
+            "التتبع المباشر",
+            [
+                "Customer sees driver on the map",
+                "Status updates: accepted → picked up → on the way → delivered",
+            ],
+            [
+                "العميل يشوف السائق على الخريطة",
+                "تحديثات الحالة: قبول → استلام → في الطريق → تسليم",
+            ],
+        ),
+        (
+            "Admin stats",
+            "إحصائيات الإدارة",
+            [
+                "Orders/day, completion rate, average delivery time",
+                "Driver online count, acceptance rate",
+                "Cancellations + reasons, zones heatmap",
+                "Credits sold vs credits used",
+            ],
+            [
+                "طلبات/يوم، نسبة الإكمال، متوسط وقت التوصيل",
+                "عدد السائقين المتصلين، نسبة القبول",
+                "الإلغاءات وأسبابها، خريطة المناطق",
+                "الكريديت المباعة مقابل المستخدمة",
+            ],
+        ),
+    ]
 
-    # --- Content Slides ---
-    add_bilingual_slide_styled(
-        prs,
-        "What it is",
-        "شنو هو",
-        ["Delivery app in Tripoli: food, groceries, pharmacy, scheduled deliveries",
-         "Customer pays cash on delivery",
-         "Driver must spend 1 credit to accept an order"],
-        ["تطبيق توصيل في طرابلس: أكل، بقالة، صيدلية، وتوصيل مجدول",
-         "العميل يدفع كاش عند الاستلام",
-         "السائق لازم يخصم كريديت واحد باش يقبل الطلب"]
-    )
+    for title_en, title_ar, ben, bar in slides:
+        s = prs.slides.add_slide(prs.slide_layouts[6])  # blank
+        _header(s, title_en, title_ar)
+        _bilingual_bullets(s, ben, bar)
 
-    add_bilingual_slide_styled(
-        prs,
-        "Customer flow",
-        "خطوات العميل",
-        ["Choose merchant → add items → checkout",
-         "See delivery fee before ordering",
-         "Track driver live on map",
-         "Pay cash + tip at delivery"],
-        ["يختار المتجر/المطعم → يضيف الطلب → يدفع",
-         "يشوف سعر التوصيل قبل ما يأكد",
-         "يتابع السائق على الخريطة",
-         "يدفع كاش + تيب عند الاستلام"]
-    )
-
-    add_bilingual_slide_styled(
-        prs,
-        "Driver flow (the core idea)",
-        "خطوات السائق (الفكرة الأساسية)",
-        ["Driver receives an order offer in the app",
-         "To accept: driver must have ≥ 1 credit",
-         "When driver accepts: 1 credit is deducted",
-         "Driver picks up, pays for items, then collects cash + delivery fee + tip"],
-        ["السائق توصله عروض طلبات في التطبيق",
-         "باش يقبل: لازم عنده كريديت واحد أو أكثر",
-         "لما يقبل: ينخصم كريديت واحد",
-         "يلتقط الطلب ويدفع قيمته، وبعدها ياخذ الكاش + التوصيل + التيب"]
-    )
-
-    add_bilingual_slide_styled(
-        prs,
-        "Credits",
-        "الكريديت",
-        ["Drivers buy prepaid credit cards from grocery stores",
-         "Each accepted order costs 1 credit",
-         "If no credit: driver can’t accept orders"],
-        ["السائق يشتري كروت كريديت مسبقة الدفع من البقالات",
-         "كل طلب يقبله = كريديت واحد",
-         "لو ما فيش كريديت: ما يقدرش يقبل طلبات"]
-    )
-
-    add_bilingual_slide_styled(
-        prs,
-        "Pricing (distance-based)",
-        "التسعير (حسب المسافة)",
-        ["Delivery fee = Base + (Per-km × Distance) + Scheduled fee (if any)",
-         "Fees are shown before placing the order"],
-        ["سعر التوصيل = أساسي + (سعر/كم × المسافة) + رسوم الجدولة (لو موجودة)",
-         "السعر يظهر قبل تأكيد الطلب"]
-    )
-
-    add_bilingual_slide_styled(
-        prs,
-        "Dispatch (hybrid)",
-        "الإسناد (هجين)",
-        ["System offers order to nearby drivers first (auto)",
-         "Dispatcher can assign manually if needed"],
-        ["السيستم يعرض الطلب على السائقين القريبين أولاً (تلقائي)",
-         "الموزّع يقدر يعيّن سائق يدوي لو احتاج"]
-    )
-
-    add_bilingual_slide_styled(
-        prs,
-        "Admin stats",
-        "إحصائيات الإدارة",
-        ["Orders/day, completion rate, average delivery time",
-         "Driver online count, acceptance rate",
-         "Cancellations + reasons, zones heatmap",
-         "Credits sold vs credits used"],
-        ["طلبات/يوم، نسبة الإكمال، متوسط وقت التوصيل",
-         "عدد السائقين المتصلين، نسبة القبول",
-         "الإلغاءات وأسبابها، خريطة المناطق",
-         "الكريديت المباعة مقابل المستخدمة"]
-    )
+    # Diagram slide (looks way less “basic”)
+    sflow = prs.slides.add_slide(prs.slide_layouts[6])
+    _header(sflow, "Order flow (end-to-end)", "رحلة الطلب (من البداية للنهاية)")
+    _order_flow_diagram(sflow)
 
     buf = io.BytesIO()
     prs.save(buf)
     return buf.getvalue()
 
-# === Streamlit UI ===
+# ---------- Streamlit UI ----------
 st.set_page_config(page_title="Kaziony PPT Maker", layout="centered")
 st.title("Kaziony PowerPoint Maker | مولّد عرض كازيوني")
-st.markdown("---")
-st.write("Click the button below to generate a professionally styled PowerPoint presentation describing how Kaziony works.")
-st.write("اضغط على الزر أدناه لإنشاء عرض تقديمي بتصميم احترافي يشرح كيفية عمل كازيوني.")
 
-if st.button("Generate Styled PowerPoint | إنشاء العرض المطور", type="primary"):
-    with st.spinner("Generating presentation... | جاري إنشاء العرض..."):
-        ppt_bytes = build_pptx_bytes()
-    st.success("Done! Download below. | تم! قم بالتنزيل أدناه.")
+app_name = st.text_input("App name", value="Kaziony")
+city = st.text_input("City", value="Tripoli")
+
+col1, col2, col3 = st.columns(3)
+with col1:
+    base_fee = st.text_input("Base fee (LYD)", value="")
+with col2:
+    per_km = st.text_input("Per-km fee (LYD/km)", value="")
+with col3:
+    credit_cost = st.text_input("Credit cost (LYD/order)", value="")
+
+st.write("Click generate, then download the PPTX.")
+if st.button("Generate PowerPoint"):
+    ppt_bytes = build_pptx_bytes(app_name, city, base_fee, per_km, credit_cost)
     st.download_button(
-        label="Download PowerPoint (.pptx) | تنزيل العرض",
+        "Download PowerPoint (.pptx)",
         data=ppt_bytes,
-        file_name="Kaziony_Explainer_Styled.pptx",
-        mime=PPT_MIME
+        file_name=f"{app_name}_Explainer.pptx",
+        mime=PPT_MIME,
     )
